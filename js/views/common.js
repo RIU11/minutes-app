@@ -8,7 +8,7 @@ export function privacyBadge(r) {
 }
 export function stateBadge(r) {
   const map = {
-    recording: ['録音中', 'unset'], recorded: ['未処理', 'gray'], diarized: ['話者を分けた', 'info'], transcribed: ['文字起こし済み', 'info'],
+    recording: ['録音中', 'unset'], paused: ['中断中（続きを録音できます）', 'unset'], recorded: ['未処理', 'gray'], diarized: ['話者を分けた', 'info'], transcribed: ['文字起こし済み', 'info'],
     summarized: ['まとめ済み', 'ok'], empty: ['音声なし', 'gray'], failed: ['失敗', 'gray'],
   };
   const [t, c] = map[r.state] || ['', 'gray'];

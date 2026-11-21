@@ -1,6 +1,6 @@
 // 記録の画面（処理の手順・部外秘の選択・各タブ）
 import { h, svg, fmtDur, fmtDateJa, toast, dialog, confirmDialog, btn } from '../ui.js';
-import { getRecord, updateRecord, onChange } from '../db.js';
+import { getRecord, updateRecord, onChange, kvGet, kvSet } from '../db.js';
 import { startJob, getJob, onJobs, cancelJob, lastJobResult, clearJobResult } from '../jobs.js';
 import { runDiarization } from '../diarize.js';
 import { runTranscription, transEngine, engineLabel, pendingCount } from '../transcribe.js';
@@ -53,9 +53,9 @@ export async function render(view, [id, tab]) {
   }
 
   // ---------- 部外秘かどうか ----------
-  async function choosePrivacy(kind) {
+  async function choosePrivacy(kind, quick = false) {
     if (kind === 'confidential') {
-      const ok = await confirmDialog('部外秘にしますか？', [
+      const ok = quick || await confirmDialog('部外秘にしますか？', [
         '部外秘にすると、この記録はロックされ、これから先ずっと外部サービスには送れなくなります（元に戻せません）。',
         '文字起こし・要約・質問づくりは、すべてこの端末の中で行います。',
       ], { ok: '部外秘にしてロック', okCls: 'lock' });
@@ -79,14 +79,23 @@ export async function render(view, [id, tab]) {
   async function ensurePrivacy() {
     rec = await getRecord(id);
     if (rec.privacy !== 'unset') return true;
+    if ((await kvGet('alwaysConfidential', false)) === true) {
+      await updateRecord(id, (r) => { r.privacy = 'confidential'; r.privacyAt = Date.now(); });
+      toast('いつもの設定で「部外秘」にしました（端末内で処理）');
+      return true;
+    }
+    const remember = h('input', { type: 'checkbox' });
     const v = await dialog({
       title: 'この録音の扱いを選んでください',
-      body: [h('p', null, '文字起こし・要約の前に選びます。'), h('p', { class: 'small muted' }, '「部外秘」を選ぶとロックされ、外部サービスには二度と送れなくなります。')],
+      body: [h('p', null, '選ぶと、すぐ文字起こしを始めます。'),
+        h('p', { class: 'small muted' }, '「部外秘」はロックされ、外部サービスには二度と送れません（端末の中だけで処理）。'),
+        h('label', { class: 'check small' }, remember, h('span', null, '次からは聞かずに「部外秘」で始める'))],
       dismissValue: null,
-      buttons: [{ label: 'やめる', value: null }, { label: '部外秘ではない', value: 'public', cls: 'pub' }, { label: '部外秘（端末内のみ）', value: 'confidential', cls: 'lock' }],
+      buttons: [{ label: 'やめる', value: null }, { label: '部外秘ではない', value: 'public', cls: 'pub' }, { label: '部外秘で始める', value: 'confidential', cls: 'lock' }],
     });
     if (!v) return false;
-    return choosePrivacy(v);
+    if (v === 'confidential' && remember.checked) { await kvSet('alwaysConfidential', true); }
+    return choosePrivacy(v, v === 'confidential');
   }
   let privSeq = 0;
   async function drawPriv() {
@@ -151,6 +160,7 @@ export async function render(view, [id, tab]) {
   }
   async function doAll() {
     if (!(await ensurePrivacy())) return;
+    if (ui.tab !== 'trans') ctx.setTab('trans');
     run('all', async ({ signal, progress }) => {
       const step = (n, label) => (p) => progress({ ratio: p.ratio, eta: p.eta, text: `${n}/3 ${label}：${p.text || ''}` });
       let r = await getRecord(id);
@@ -188,6 +198,17 @@ export async function render(view, [id, tab]) {
     if (ui.wasAllDone === false && allDone && !job) ui.procOpen = false; // 処理が終わったら、たたむ
     ui.wasAllDone = allDone;
     const noAudio = !rec.audio || !rec.audio.chunks;
+    if (rec.state === 'recording' || rec.state === 'paused') {
+      const card0 = h('div', { class: 'card' }, h('h2', null, rec.state === 'recording' ? '録音中です' : '中断した録音です'),
+        h('p', { class: 'small muted' }, rec.state === 'recording' ? '「録音」の画面で「停止」を押すと、文字起こしに進みます。' : '続きを録音するか、ここで録音を終えて文字起こしに進めます。'),
+        h('div', { class: 'row' },
+          h('a', { class: 'btn primary', href: '#/rec', html: svg('mic') + `<span>${rec.state === 'recording' ? '録音の画面へ' : '続きを録音する（録音の画面へ）'}</span>` }),
+          rec.state === 'paused' ? btn('ここで録音を終える', async () => {
+            const { finishPaused } = await import('../recording.js');
+            await finishPaused(id); rec = await getRecord(id); drawAll(); doAll();
+          }) : null));
+      procBox.append(card0); return;
+    }
 
     const card = h('div', { class: 'card' });
     const top = h('div', { class: 'row between' }, h('h2', { style: { margin: 0 } }, allDone ? '✓ 処理が終わっています' : '処理の手順'));
@@ -205,6 +226,13 @@ export async function render(view, [id, tab]) {
     if (noAudio && !hasText) { card.append(h('p', { class: 'small muted', style: { marginTop: '8px' } }, 'この記録には音声がありません。')); procBox.append(card); return; }
     if (!ui.procOpen && !job) { card.append(h('p', { class: 'tiny muted', style: { margin: '4px 0 0' } }, `文字起こし：${(rec.trans && rec.trans.model) || ''}　まとめ：${rec.summary ? summaryEngineLabel(rec.summary.engine) : ''}`)); procBox.append(card); return; }
 
+    if (!job && !diarDone && !hasText && !ui.showSteps) {
+      card.querySelector('h2').textContent = '文字起こし';
+      card.append(h('p', { class: 'small muted', style: { margin: '6px 0 12px' } }, 'ボタンを押すだけで、話者の分け → 文字起こし → まとめ まで自動で進みます。'),
+        btn('文字起こしをはじめる', doAll, { cls: 'primary big block', ic: 'play' }),
+        btn('くわしい設定で進める', () => { ui.showSteps = true; ui.procOpen = true; drawProc(); }, { cls: 'ghost small block' }));
+      procBox.append(card); return;
+    }
     const busy = !!job;
     const steps = h('ol', { class: 'steps', style: { marginTop: '14px' } });
     // 1 話者
@@ -256,6 +284,11 @@ export async function render(view, [id, tab]) {
   }
   function drawAll() { drawHead(); drawPriv(); drawProc(); drawTabs(); drawBody(); }
   drawAll();
+  let auto = null; try { auto = sessionStorage.getItem('minutes-autostart'); } catch (e) { /* 無視 */ }
+  if (auto === id) {
+    try { sessionStorage.removeItem('minutes-autostart'); } catch (e) { /* 無視 */ }
+    if (!(rec.diar && rec.diar.done) && rec.audio && rec.audio.chunks && !getJob(id)) setTimeout(doAll, 300);
+  }
 
   let t = null;
   const offDb = onChange((cid) => { if (cid !== id) return; clearTimeout(t); t = setTimeout(async () => { rec = await getRecord(id); if (!rec) { location.hash = '#/'; return; } drawHead(); drawPriv(); drawProc(); drawBody(); }, 250); });

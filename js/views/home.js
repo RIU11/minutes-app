@@ -1,6 +1,6 @@
 // 一覧（ホーム）
 import { h, svg, fmtDur, fmtDateJa, normalize, toast, todayISO, nowHM } from '../ui.js';
-import { listRecords, onChange, putRecord, newRecord, updateRecord } from '../db.js';
+import { listRecords, onChange, putRecord, newRecord, updateRecord, kvGet } from '../db.js';
 import { dueTasks, dueLabel } from '../notify.js';
 import { decodeFileTo16k, storeFloatAsChunks } from '../audio.js';
 import { privacyBadge, stateBadge } from './common.js';
@@ -35,6 +35,7 @@ export async function render(view) {
       const res = await storeFloatAsChunks(r.id, f32);
       await updateRecord(r.id, (x) => { x.audio = { ...x.audio, ...res }; x.state = 'recorded'; });
       toast('読み込みました');
+        if ((await kvGet('autoStart', true)) !== false) { try { sessionStorage.setItem('minutes-autostart', r.id); } catch (e) { /* 無視 */ } }
       location.hash = '#/r/' + r.id;
     } catch (e) {
       console.error(e);

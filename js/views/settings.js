@@ -32,6 +32,14 @@ export async function render(view) {
     ),
   ));
 
+  // かんたん操作
+  const [autoStart, alwaysConf] = await Promise.all([kvGet('autoStart', true), kvGet('alwaysConfidential', false)]);
+  const row0 = (label, desc, el) => h('div', { class: 'setrow' }, h('div', null, h('div', { class: 'lbl' }, label), h('div', { class: 'desc' }, desc)), el);
+  view.append(h('div', { class: 'card' }, h('h2', null, 'かんたん操作'),
+    row0('録音を止めたら、すぐ文字起こしを始める', '話者の分け → 文字起こし → まとめ まで自動で進みます', switchEl(autoStart !== false, (v) => kvSet('autoStart', v))),
+    row0('いつも「部外秘」で始める', '毎回の確認を出さずに、端末の中だけで処理します（記録はロックされます）', switchEl(alwaysConf === true, (v) => kvSet('alwaysConfidential', v))),
+  ));
+
   // 文字起こし
   const wl = h('div', { class: 'radiolist' });
   const pickW = async (v) => { await kvSet('whisperModel', v); mlTerminate(); toast('文字起こしのAIを変えました'); };

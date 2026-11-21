@@ -3,50 +3,95 @@ import { putPcm, putBlob } from './db.js';
 import { RATE, CHUNK } from './audio.js';
 
 export class Recorder {
-  constructor(rid, { onLevel, onTick, onError } = {}) {
-    this.rid = rid; this.onLevel = onLevel; this.onTick = onTick; this.onError = onError;
+  // resume: 中断した録音の続き { chunkIdx, chunkData(Int16Array|null), samples, blobIdx }
+  constructor(rid, { onLevel, onTick, onError, onState, resume = null } = {}) {
+    this.rid = rid; this.onLevel = onLevel; this.onTick = onTick; this.onError = onError; this.onState = onState;
     this.chunkBuf = new Int16Array(CHUNK); this.chunkLen = 0; this.chunkIdx = 0;
     this.samples = 0; this.paused = false; this.stopped = false;
     this.blobIdx = 0; this.saving = Promise.resolve();
-    this.wakeLock = null; this.mime = '';
+    this.wakeLock = null; this.mime = ''; this.mixedBlobs = false; this.interrupted = false;
+    if (resume) {
+      this.chunkIdx = resume.chunkIdx; this.samples = resume.samples; this.blobIdx = resume.blobIdx || 0; this.mixedBlobs = true;
+      if (resume.chunkData && resume.chunkData.length < CHUNK) { this.chunkBuf.set(resume.chunkData); this.chunkLen = resume.chunkData.length; }
+    }
   }
 
-  async start() {
+  async _getStream() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('この端末・ブラウザでは録音できません（https で開いているか確認してください）');
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true },
-    });
-    const AC = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new AC();
-    await this.ctx.audioWorklet.addModule(new URL('./pcm-worklet.js', import.meta.url));
-    this.src = this.ctx.createMediaStreamSource(this.stream);
-    this.node = new AudioWorkletNode(this.ctx, 'pcm-capture', { processorOptions: { targetRate: RATE }, numberOfOutputs: 1, outputChannelCount: [1] });
-    this.node.port.onmessage = (e) => this._onData(e.data);
-    this.mute = this.ctx.createGain(); this.mute.gain.value = 0;
-    this.src.connect(this.node); this.node.connect(this.mute); this.mute.connect(this.ctx.destination);
-    if (this.ctx.state === 'suspended') await this.ctx.resume();
+    return navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
+  }
 
-    // 書き出し用の圧縮音声
+  // マイクをつなぐ（途中でつなぎ直すときも使う）
+  _attach(stream) {
+    if (this.src) { try { this.src.disconnect(); } catch (e) { /* 無視 */ } }
+    if (this.stream && this.stream !== stream) { try { this.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* 無視 */ } }
+    this.stream = stream;
+    this.src = this.ctx.createMediaStreamSource(stream);
+    this.src.connect(this.node);
+    const track = stream.getAudioTracks()[0];
+    if (track) track.addEventListener('ended', () => { if (!this.stopped) this._setInterrupted(true); });
+    // 書き出し用の圧縮音声（つなぎ直したら、ひとつのファイルにはできないので WAV で書き出す）
+    if (this.mr) { try { if (this.mr.state !== 'inactive') this.mr.stop(); } catch (e) { /* 無視 */ } this.mixedBlobs = true; }
     try {
       const types = ['audio/webm;codecs=opus', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4', 'audio/webm'];
       this.mime = types.find((t) => window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
       if (window.MediaRecorder) {
-        this.mr = new MediaRecorder(this.stream, this.mime ? { mimeType: this.mime, audioBitsPerSecond: 32000 } : undefined);
+        this.mr = new MediaRecorder(stream, this.mime ? { mimeType: this.mime, audioBitsPerSecond: 32000 } : undefined);
         this.mime = this.mr.mimeType || this.mime;
         this.mr.ondataavailable = (ev) => {
           if (ev.data && ev.data.size) { const i = this.blobIdx++; this.saving = this.saving.then(() => putBlob(this.rid, i, ev.data)).catch((err) => this.onError && this.onError(err)); }
         };
         this.mr.start(10000);
+        if (this.paused) this.mr.pause();
       }
     } catch (e) { this.mr = null; }
+    this._setInterrupted(false);
+  }
 
+  _setInterrupted(v) {
+    if (this.interrupted === v) return;
+    this.interrupted = v;
+    if (this.onState) this.onState(v ? 'interrupted' : 'running');
+  }
+
+  async start() {
+    const stream = await this._getStream();
+    const AC = window.AudioContext || window.webkitAudioContext;
+    this.ctx = new AC();
+    await this.ctx.audioWorklet.addModule(new URL('./pcm-worklet.js', import.meta.url));
+    this.node = new AudioWorkletNode(this.ctx, 'pcm-capture', { processorOptions: { targetRate: RATE }, numberOfOutputs: 1, outputChannelCount: [1] });
+    this.node.port.onmessage = (e) => this._onData(e.data);
+    this.mute = this.ctx.createGain(); this.mute.gain.value = 0;
+    this.node.connect(this.mute); this.mute.connect(this.ctx.destination);
+    this._attach(stream);
+    if (this.ctx.state !== 'running') await this.ctx.resume().catch(() => {});
+    this.ctx.addEventListener('statechange', () => { if (!this.stopped && this.ctx.state !== 'running') this._setInterrupted(true); });
     await this._lock();
-    this._vis = () => { if (document.visibilityState === 'visible' && !this.stopped) this._lock(); };
+    // 画面に戻ったら、止められたマイクをつなぎ直す（録音は終わらせない）
+    this._vis = () => { if (document.visibilityState === 'visible' && !this.stopped) { this._lock(); this.recover(); } };
     document.addEventListener('visibilitychange', this._vis);
+    window.addEventListener('focus', this._vis);
+    window.addEventListener('pageshow', this._vis);
+    this._watch = setInterval(() => { if (document.visibilityState === 'visible') this.recover(); }, 3000);
+  }
+
+  // マイクや音の処理が止められていたら、もとに戻す
+  async recover() {
+    if (this.stopped || this._recovering) return;
+    this._recovering = true;
+    try {
+      if (this.ctx.state !== 'running') { await this.ctx.resume().catch(() => {}); }
+      const track = this.stream && this.stream.getAudioTracks()[0];
+      if (!track || track.readyState === 'ended') {
+        const s = await this._getStream();
+        if (this.stopped) { s.getTracks().forEach((t) => t.stop()); return; }
+        this._attach(s);
+      } else if (this.ctx.state === 'running') this._setInterrupted(false);
+    } catch (e) { if (this.onError) this.onError(e); } finally { this._recovering = false; }
   }
 
   async _lock() {
-    try { if ('wakeLock' in navigator && !this.wakeLock) { this.wakeLock = await navigator.wakeLock.request('screen'); this.wakeLock.addEventListener('release', () => { this.wakeLock = null; }); } } catch (e) { /* 使えなくても続ける */ }
+    try { if ('wakeLock' in navigator && !this.wakeLock && document.visibilityState === 'visible') { this.wakeLock = await navigator.wakeLock.request('screen'); this.wakeLock.addEventListener('release', () => { this.wakeLock = null; }); } } catch (e) { /* 使えなくても続ける */ }
   }
 
   _onData(d) {
@@ -68,6 +113,16 @@ export class Recorder {
     if (d.final && this._flushResolve) this._flushResolve();
   }
 
+  // 途中まで（10秒に満たない分）も保存しておく。閉じられても失わないように
+  async checkpoint() {
+    if (this.chunkLen > 0) {
+      const i = this.chunkIdx; const part = this.chunkBuf.slice(0, this.chunkLen);
+      this.saving = this.saving.then(() => putPcm(this.rid, i, part.buffer)).catch(() => {});
+    }
+    await this.saving;
+    return { chunks: this.chunkIdx + (this.chunkLen > 0 ? 1 : 0), samples: this.samples };
+  }
+
   get seconds() { return this.samples / RATE; }
 
   pause() {
@@ -81,12 +136,13 @@ export class Recorder {
     this.paused = false;
     this.node.port.postMessage({ cmd: 'resume' });
     try { if (this.mr && this.mr.state === 'paused') this.mr.resume(); } catch (e) { /* 無視 */ }
+    this.recover();
   }
 
   async stop() {
     if (this.stopped) return this.result();
     this.stopped = true;
-    // 残りを受け取る
+    clearInterval(this._watch);
     await new Promise((resolve) => { this._flushResolve = resolve; try { this.node.port.postMessage({ cmd: 'flush' }); } catch (e) { resolve(); } setTimeout(resolve, 800); });
     this._flushResolve = null;
     if (this.chunkLen > 0) {
@@ -102,6 +158,8 @@ export class Recorder {
     try { await this.ctx.close(); } catch (e) { /* 無視 */ }
     try { if (this.wakeLock) await this.wakeLock.release(); } catch (e) { /* 無視 */ }
     document.removeEventListener('visibilitychange', this._vis);
+    window.removeEventListener('focus', this._vis);
+    window.removeEventListener('pageshow', this._vis);
     await this.saving;
     return this.result();
   }
@@ -109,7 +167,7 @@ export class Recorder {
   result() {
     return {
       chunks: this.chunkIdx, samples: this.samples, duration: this.samples / RATE,
-      compressed: this.blobIdx ? { mime: this.mime || 'audio/webm', count: this.blobIdx } : null,
+      compressed: this.blobIdx && !this.mixedBlobs ? { mime: this.mime || 'audio/webm', count: this.blobIdx } : null,
     };
   }
 }

@@ -55,7 +55,7 @@ function updateStatus() {
     pill.className = 'badge status-pill unset';
     pill.style.color = 'var(--rec)';
     pill.href = '#/rec';
-    pill.textContent = (s.paused ? '⏸ 一時停止 ' : '● 録音中 ') + fmtDur(s.seconds);
+    pill.textContent = (s.paused ? '⏸ 一時停止 ' : s.interrupted ? '⚠ マイク停止中 ' : '● 録音中 ') + fmtDur(s.seconds);
   } else {
     pill.className = 'badge status-pill info';
     pill.style.color = '';
@@ -77,12 +77,10 @@ async function boot() {
   onRecording(updateStatus);
   onJobs(updateStatus);
   setInterval(updateStatus, 1000);
+  let fixed = [];
+  try { fixed = await recoverInterrupted(); } catch (e) { console.warn(e); }
   await route();
-
-  try {
-    const fixed = await recoverInterrupted();
-    if (fixed.length) toast('前回、途中で止まった録音を保存しました');
-  } catch (e) { console.warn(e); }
+  if (fixed.length) toast('中断した録音があります。「録音」から続きを録音できます', '', 5000);
 
   if ('serviceWorker' in navigator) {
     try {

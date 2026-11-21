@@ -1,8 +1,9 @@
 // 録音の画面
 import { h, svg, fmtDur, toast, todayISO, nowHM, confirmDialog } from '../ui.js';
-import { startRecording, stopRecording, pauseRecording, resumeRecording, addAnchor, onRecording, recState, isRecording } from '../recording.js';
+import { startRecording, stopRecording, pauseRecording, resumeRecording, addAnchor, onRecording, recState, isRecording, continueRecording, pausedRecords, finishPaused } from '../recording.js';
+import { fmtDateJa, btn } from '../ui.js';
 import { levelInfo, MicMonitor } from '../recorder.js';
-import { getRecord, updateRecord } from '../db.js';
+import { getRecord, updateRecord, kvGet } from '../db.js';
 import { detect } from '../device.js';
 
 let draft = null; // 入力途中の情報（画面を移っても残す）
@@ -53,11 +54,35 @@ export async function render(view) {
     h('ul', { style: { margin: '4px 0 0', paddingLeft: '1.2em' } },
       h('li', null, 'スマホやパソコンは、先生の方に向けて机に置きましょう。'),
       h('li', null, '録音中は画面を開いたままにしてください（自動で画面が消えないようにしています）。'),
-      d.ios ? h('li', null, 'iPhone・iPad は、ほかのアプリに切り替えたり画面を消したりすると録音が止まります。') : null,
+      h('li', null, '「停止」を押すまで録音は終わりません。画面を閉じてマイクが止められても、戻ると自動で再開します（止まっていた間は録音されません）。'),
+      d.ios ? h('li', null, 'iPhone・iPad は、画面を消したりほかのアプリに切り替えたりすると、その間マイクが止められます。できるだけ画面を開いたままにしてください。') : null,
       h('li', null, '録音はこの端末の中だけに保存されます。'),
     ),
   );
-  view.append(panel, info, tips);
+  const pausedBox = h('div');
+  view.append(pausedBox, panel, info, tips);
+  const drawPaused = async () => {
+    pausedBox.innerHTML = '';
+    if (isRecording()) return;
+    for (const r of await pausedRecords()) {
+      pausedBox.append(h('div', { class: 'notice warn' },
+        h('strong', null, '中断した録音があります'),
+        h('div', { class: 'small' }, `${r.title || '（タイトルなし）'}・${fmtDateJa(r.date)} ${r.time || ''}・${fmtDur(r.audio.duration || 0)}まで録音済み`),
+        h('div', { class: 'row', style: { marginTop: '8px' } },
+          btn('続きを録音する', async () => {
+            try { await continueRecording(r.id); draft = { title: r.title, date: r.date, time: r.time, place: r.place, participants: r.participants, agenda: r.agenda }; info.open = false; toast('続きの録音をはじめました'); drawPaused(); }
+            catch (e) { toast(micError(e), 'err', 6000); }
+          }, { cls: 'primary small', ic: 'mic' }),
+          btn('ここで録音を終える', async () => {
+            if (!(await confirmDialog('この録音を終えますか？', '終えると、文字起こしに進みます。', { ok: '終える' }))) return;
+            await finishPaused(r.id);
+            if ((await kvGet('autoStart', true)) !== false) { try { sessionStorage.setItem('minutes-autostart', r.id); } catch (e) { /* 無視 */ } }
+            location.hash = '#/r/' + r.id;
+          }, { cls: 'small' })),
+      ));
+    }
+  };
+  drawPaused();
 
   let monitor = null;
   const showLevel = (rms) => {
@@ -81,7 +106,7 @@ export async function render(view) {
     testBtn.classList.toggle('hide', rec);
     anchorBtn.disabled = !rec || s.paused;
     stateEl.className = 'recstate' + (rec && !s.paused ? ' live' : '');
-    stateEl.textContent = rec ? (s.paused ? '一時停止中' : '録音中') : '準備ができたら、下の赤いボタンを押してください';
+    stateEl.textContent = rec ? (s.paused ? '一時停止中' : s.interrupted ? 'マイクが止められています（画面に戻ると自動で再開します）' : '録音中') : '準備ができたら、下の赤いボタンを押してください';
     if (rec) showLevel(s.paused ? 0 : s.level);
   };
   const off = onRecording(paint);
@@ -98,13 +123,14 @@ export async function render(view) {
         toast('録音をはじめました');
       } catch (e) { toast(micError(e), 'err', 6000); } finally { mainBtn.disabled = false; }
     } else {
-      const ok = await confirmDialog('録音を止めますか？', '止めると保存して、次の「話者を分ける・文字起こし」の画面に進みます。', { ok: '止めて保存', cancel: '続ける' });
+      const ok = await confirmDialog('録音を止めますか？', '止めると保存して、すぐ文字起こしを始めます。', { ok: '止めて保存', cancel: '続ける' });
       if (!ok) return;
       mainBtn.disabled = true;
       try {
         const rid = await stopRecording();
         draft = null;
         toast('保存しました');
+        if ((await kvGet('autoStart', true)) !== false) { try { sessionStorage.setItem('minutes-autostart', rid); } catch (e) { /* 無視 */ } }
         location.hash = '#/r/' + rid;
       } catch (e) { toast('保存に失敗しました：' + e.message, 'err', 6000); } finally { mainBtn.disabled = false; }
     }

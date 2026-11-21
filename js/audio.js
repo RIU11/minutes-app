@@ -192,6 +192,7 @@ export async function storeFloatAsChunks(rid, f32, onProgress) {
 
 // 録音した音声（圧縮）をひとつのファイルにする
 export async function compressedAudio(rec) {
+  if (!rec.audio || !rec.audio.compressed) return null;
   const parts = await getBlobs(rec.id);
   if (!parts.length) return null;
   const mime = (rec.audio.compressed && rec.audio.compressed.mime) || parts[0].type || 'audio/webm';
