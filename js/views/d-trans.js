@@ -25,14 +25,15 @@ export function draw(box, ctx) {
     toast(n ? `${n}か所を置き換えました` : '見つかりませんでした');
   }, { cls: 'small', ic: 'replace' });
   const offToggle = h('label', { class: 'check small' }, h('input', { type: 'checkbox', checked: state.showOff, onchange: (e) => { state.showOff = e.target.checked; paint(); } }), h('span', null, 'オフの人の発言も表示'));
-  const tools = h('div', { class: 'card tight' },
-    h('div', { class: 'grid2' }, findIn, repIn),
+  const tools = h('details', { class: 'card tight tools', open: !!state.find },
+    h('summary', null, 'さがす・置き換える'),
+    h('div', { class: 'grid2', style: { marginTop: '10px' } }, findIn, repIn),
     h('div', { class: 'row between', style: { marginTop: '8px' } }, h('div', { class: 'row' }, repBtn, hitInfo), offToggle),
-    h('p', { class: 'tiny muted', style: { margin: '8px 0 0' } }, '文をタップすると直せます。話者の名前をタップすると、その発言の話者を変えられます。▶ でその部分の音声を聞けます。'),
   );
+  const hint = h('p', { class: 'secfoot', style: { margin: '-14px 16px 16px' } }, '文をタップすると直せます。話者の名前をタップすると話者を変えられます。▶ でその部分を聞けます。');
   const list = h('ul', { class: 'seglist' });
   const card = h('div', { class: 'card' }, list);
-  box.append(tools, card);
+  box.append(tools, hint, card);
 
   let playing = null;
   const paint = () => {

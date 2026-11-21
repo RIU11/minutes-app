@@ -7,11 +7,11 @@ import { checkAnnounce } from './announce.js';
 import { kvGet } from './db.js';
 
 const ROUTES = [
-  [/^#?\/?$/, () => import('./views/home.js'), 'home'],
-  [/^#\/rec$/, () => import('./views/rec.js'), 'rec'],
-  [/^#\/r\/([^/]+)(?:\/(\w+))?$/, () => import('./views/detail.js'), 'home'],
-  [/^#\/settings$/, () => import('./views/settings.js'), 'settings'],
-  [/^#\/setup(?:\/([\w-]+))?$/, () => import('./views/setup.js'), 'settings'],
+  [/^#?\/?$/, () => import('./views/home.js'), 'home', ''],
+  [/^#\/rec$/, () => import('./views/rec.js'), 'rec', '録音'],
+  [/^#\/r\/([^/]+)(?:\/(\w+))?$/, () => import('./views/detail.js'), 'home', '記録'],
+  [/^#\/settings$/, () => import('./views/settings.js'), 'settings', '設定'],
+  [/^#\/setup(?:\/([\w-]+))?$/, () => import('./views/setup.js'), 'settings', '外部サービスの準備'],
 ];
 
 let cleanup = null;
@@ -21,7 +21,13 @@ async function route() {
   const hash = location.hash || '#/';
   const found = ROUTES.find(([re]) => re.test(hash));
   if (!found) { location.hash = '#/'; return; }
-  const [re, loader, tab] = found;
+  const [re, loader, tab, title] = found;
+  // 上のバー：記録の画面は「‹ 一覧」、大きなタイトルがある画面は空ける
+  const bt = document.querySelector('.brand span'); const brand = document.querySelector('.brand');
+  const isDetail = tab === 'home' && title === '記録';
+  const isSetup = /setup/.test(hash);
+  if (bt) bt.textContent = isDetail ? '一覧' : isSetup ? '設定' : title;
+  if (brand) { brand.classList.toggle('back', isDetail || isSetup); brand.href = isSetup ? '#/settings' : '#/'; brand.style.visibility = (isDetail || isSetup || title === '録音') ? 'visible' : 'hidden'; }
   const m = hash.match(re);
   if (cleanup) { try { cleanup(); } catch (e) { console.error(e); } cleanup = null; }
   const view = document.getElementById('view');

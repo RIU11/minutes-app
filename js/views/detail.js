@@ -104,7 +104,7 @@ export async function render(view, [id, tab]) {
     if (my !== privSeq) return;
     privBox.innerHTML = '';
     if (rec.privacy === 'confidential') {
-      privBox.append(h('div', { class: 'notice lock' }, h('strong', { html: svg('lock') + ' 部外秘（ロック中）' }), h('span', { class: 'small' }, 'この記録は端末の中だけで処理します。外部サービスには送れません。この設定は変えられません。')));
+      privBox.append(h('div', { class: 'notice lock slim' }, h('strong', { html: svg('lock') + ' 部外秘' }), h('span', null, '端末の中だけで処理します（外部には送れません）')));
     } else if (rec.privacy === 'public') {
       const ready = ready0;
       const box = h('div', { class: 'notice pub' }, h('strong', { html: svg('globe') + ' 部外秘ではない' }),
@@ -211,8 +211,8 @@ export async function render(view, [id, tab]) {
     }
 
     const card = h('div', { class: 'card' });
-    const top = h('div', { class: 'row between' }, h('h2', { style: { margin: 0 } }, allDone ? '✓ 処理が終わっています' : '処理の手順'));
-    if (allDone && !job) top.append(btn(ui.procOpen ? '閉じる' : 'ひらく', () => { ui.procOpen = !ui.procOpen; drawProc(); }, { cls: 'small ghost' }));
+    const top = h('div', { class: 'row between' }, h('h2', { style: { margin: 0 } }, allDone ? '処理済み' : '処理の手順'));
+    if (allDone && !job) top.append(btn(ui.procOpen ? '閉じる' : 'くわしく', () => { ui.procOpen = !ui.procOpen; drawProc(); }, { cls: 'small ghost' }));
     card.append(top);
 
     if (job) {
@@ -224,7 +224,7 @@ export async function render(view, [id, tab]) {
       card.append(h('div', { class: 'notice err small', style: { margin: '10px 0 0' } }, h('strong', null, 'うまくいきませんでした'), String(last.error.message || last.error)));
     }
     if (noAudio && !hasText) { card.append(h('p', { class: 'small muted', style: { marginTop: '8px' } }, 'この記録には音声がありません。')); procBox.append(card); return; }
-    if (!ui.procOpen && !job) { card.append(h('p', { class: 'tiny muted', style: { margin: '4px 0 0' } }, `文字起こし：${(rec.trans && rec.trans.model) || ''}　まとめ：${rec.summary ? summaryEngineLabel(rec.summary.engine) : ''}`)); procBox.append(card); return; }
+    if (!ui.procOpen && !job) { card.className = 'card tight'; card.append(h('p', { class: 'tiny muted', style: { margin: '0' } }, `文字起こし：${(rec.trans && rec.trans.model) || ''}　まとめ：${rec.summary ? summaryEngineLabel(rec.summary.engine) : ''}`)); procBox.append(card); return; }
 
     if (!job && !diarDone && !hasText && !ui.showSteps) {
       card.querySelector('h2').textContent = '文字起こし';

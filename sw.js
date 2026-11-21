@@ -1,5 +1,5 @@
 // オフラインで開けるようにする ＋ 端末内AIを速く動かすための設定（Cross-Origin Isolation）
-const VERSION = 'minutes-v3';
+const VERSION = 'minutes-v4';
 const CDN = 'minutes-cdn-v1';
 const SHELL = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',

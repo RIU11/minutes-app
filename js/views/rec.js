@@ -37,7 +37,7 @@ export async function render(view) {
   );
 
   const timeEl = h('div', { class: 'rectime' }, '0:00');
-  const stateEl = h('div', { class: 'recstate' }, '準備ができたら、下の赤いボタンを押してください');
+  const stateEl = h('div', { class: 'recstate' }, 'タップして録音');
   const meterFill = h('div');
   const meter = h('div', { class: 'meter', title: '声の大きさ' }, meterFill, h('span', { class: 'mark', style: { left: '36%' } }), h('span', { class: 'mark', style: { left: '86%' } }));
   const levelMsg = h('div', { class: 'levelmsg' }, '');
@@ -61,6 +61,7 @@ export async function render(view) {
   );
   const pausedBox = h('div');
   view.append(pausedBox, panel, info, tips);
+  tips.classList.add('tiny');
   const drawPaused = async () => {
     pausedBox.innerHTML = '';
     if (isRecording()) return;
@@ -106,7 +107,7 @@ export async function render(view) {
     testBtn.classList.toggle('hide', rec);
     anchorBtn.disabled = !rec || s.paused;
     stateEl.className = 'recstate' + (rec && !s.paused ? ' live' : '');
-    stateEl.textContent = rec ? (s.paused ? '一時停止中' : s.interrupted ? 'マイクが止められています（画面に戻ると自動で再開します）' : '録音中') : '準備ができたら、下の赤いボタンを押してください';
+    stateEl.textContent = rec ? (s.paused ? '一時停止中' : s.interrupted ? 'マイクが止められています（画面に戻ると自動で再開します）' : '録音中') : 'タップして録音';
     if (rec) showLevel(s.paused ? 0 : s.level);
   };
   const off = onRecording(paint);

@@ -9,14 +9,14 @@ export async function render(view) {
   const search = h('input', { type: 'search', placeholder: 'タイトル・内容・人の名前でさがす', 'aria-label': '記録をさがす' });
   try { search.value = sessionStorage.getItem('home-q') || ''; } catch (e) { /* 無視 */ }
   const fileIn = h('input', { type: 'file', accept: 'audio/*,video/*,.m4a,.mp3,.wav,.webm,.ogg,.aac,.mp4,.mov', class: 'hide' });
-  const importBtn = h('button', { type: 'button', class: 'btn', html: svg('upload') + '<span>音声ファイルを読み込む</span>', onclick: () => fileIn.click() });
+  const importBtn = h('button', { type: 'button', class: 'btn', html: '<span>音声ファイルを読み込む</span>', onclick: () => fileIn.click() });
   const hero = h('div', { class: 'hero' },
-    h('a', { class: 'btn rec big', href: '#/rec', html: svg('mic') + '<span>録音をはじめる</span>' }),
+    h('a', { class: 'btn rec big', href: '#/rec' }, '録音をはじめる'),
     importBtn,
   );
   const dueBox = h('div');
   const listBox = h('div');
-  view.append(hero, fileIn, dueBox, h('div', { class: 'searchbox', html: svg('search') }, search), listBox);
+  view.append(h('h1', { class: 'pagetitle' }, '議事録'), h('div', { class: 'searchbox', html: svg('search') }, search), hero, fileIn, dueBox, listBox);
 
   fileIn.addEventListener('change', async () => {
     const f = fileIn.files && fileIn.files[0];
@@ -58,6 +58,7 @@ export async function render(view) {
       return;
     }
     if (!items.length) { listBox.append(h('p', { class: 'muted center' }, '見つかりませんでした')); return; }
+    listBox.append(h('div', { class: 'sechead' }, q ? `${items.length}件` : 'すべての記録'));
     const ul = h('ul', { class: 'reclist' });
     for (const r of items) {
       const snip = (r.summary && r.summary.overview) || (r.segs || []).filter((s) => s.text).slice(0, 3).map((s) => s.text).join(' ') || r.agenda || '';
@@ -82,7 +83,7 @@ export async function render(view) {
       ul.append(h('li', null, h('span', { class: 'badge ' + (days < 0 ? 'unset' : days <= 1 ? 'unset' : 'info'), style: days < 0 ? { color: 'var(--danger)' } : null }, dueLabel(task.due)),
         h('a', { href: `#/r/${rec.id}/info`, class: 'grow' }, task.text), h('span', { class: 'tiny muted' }, rec.title || '')));
     }
-    dueBox.append(h('div', { class: 'card tight' }, h('h2', { html: svg('bell') + '<span>期限が近い宿題</span>' }), ul));
+    dueBox.append(h('div', { class: 'sechead' }, '期限が近い宿題'), h('div', { class: 'card tight' }, ul));
   };
 
   const reload = async () => { all = await listRecords(); all = all.filter((r) => r.state !== 'failed'); draw(); drawDue(); };

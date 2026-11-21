@@ -22,7 +22,7 @@ export async function render(view) {
     h('div', null, h('div', { class: 'rt' }, title), desc ? h('div', { class: 'rd' }, desc) : null));
 
   // 端末
-  view.append(h('h1', null, '設定'));
+  view.append(h('h1', { class: 'pagetitle' }, '設定'));
   view.append(h('div', { class: 'card' },
     h('h2', null, 'この端末'),
     h('dl', { class: 'kv' },
